@@ -1,0 +1,125 @@
+# --- PROVEEDOR Y RECURSOS BASE ---
+
+resource "aws_s3_bucket" "test_bucket" {
+  bucket = var.s3_bucket_name
+
+  tags = {
+    Name        = "My bucket"
+    Environment = "Dev"
+  }
+}
+
+# --- RETO 1: Usuario con acceso de lectura SOLO a un bucket específico ---
+
+resource "aws_iam_user" "user" {
+  name = var.user_name
+}
+
+resource "aws_iam_access_key" "user" {
+  user = aws_iam_user.user.name
+}
+
+# Política personalizada: Corregida para incluir el Bucket y sus Objetos
+data "aws_iam_policy_document" "s3_read_only_policy_doc" {
+  statement {
+    actions = [
+      "s3:Get*",
+      "s3:List*"
+    ]
+    resources = [
+      "arn:aws:s3:::${var.s3_bucket_name}",      # Requerido para listar el contenido del bucket
+      "arn:aws:s3:::${var.s3_bucket_name}/*"    # Requerido para leer los objetos dentro
+    ]
+  }
+}
+
+resource "aws_iam_policy" "s3_read_only_policy" {
+  name        = "S3SpecificBucketReadOnly"
+  description = "Permite leer solo el bucket ${var.s3_bucket_name}"
+  policy      = data.aws_iam_policy_document.s3_read_only_policy_doc.json
+}
+
+resource "aws_iam_user_policy_attachment" "user_attach" {
+  user       = aws_iam_user.user.name
+  policy_arn = aws_iam_policy.s3_read_only_policy.arn
+}
+
+
+# --- RETO 2: Rol para EC2 (Trust Policy + Identity Policy) ---
+
+# 1. Trust Policy: Define QUIÉN puede usar el rol (en este caso, el servicio EC2)
+data "aws_iam_policy_document" "ec2_trust_policy" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "ec2_role" {
+  name               = var.role_name
+  assume_role_policy = data.aws_iam_policy_document.ec2_trust_policy.json
+}
+
+# 2. Attachment: Unimos la política de lectura de S3 creada arriba al Rol
+resource "aws_iam_role_policy_attachment" "role_s3_attach" {
+  role       = aws_iam_role.ec2_role.name
+  policy_arn = aws_iam_policy.s3_read_only_policy.arn
+}
+
+# 3. Instance Profile: El contenedor que permite asignar el rol a la instancia
+resource "aws_iam_instance_profile" "ec2_profile" {
+  name = var.profile_name
+  role = aws_iam_role.ec2_role.name # Referencia directa al recurso
+}
+
+# Fetch de AMI
+data "aws_ami" "ami_amazon" {
+  most_recent = true
+  owners      = ["amazon"]
+  filter {
+    name   = "name"
+    values = ["al2023-ami-*-x86_64"]
+  }
+}
+
+# Creación de instancia EC2 corregida
+resource "aws_instance" "ec2_instance" {
+  ami                  = data.aws_ami.ami_amazon.id
+  instance_type        = "t3.micro"
+  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name # Referencia directa
+
+  tags = {
+    Name = "EC2WithS3Access"
+  }
+}
+
+
+# --- RETO 3: Restricción por IP (Whitelist) ---
+
+data "aws_iam_policy_document" "policy_data_access_by_ip" {
+  statement {
+    effect    = "Deny"
+    actions   = ["*"]
+    resources = ["*"]
+    condition {
+      test     = "NotIpAddress" # Denegar si la IP NO es la permitida
+      variable = "aws:SourceIp"
+      values   = ["102.222.12.123/32"] # Cambia por tu IP real
+    }
+  }
+}
+
+resource "aws_iam_policy" "policy_access_by_ip" {
+  name        = "StrictIPRestrictionPolicy"
+  description = "Denegar acceso si la IP no es la de la oficina/casa"
+  policy      = data.aws_iam_policy_document.policy_data_access_by_ip.json
+}
+
+# Nota: Para que esta política funcione, debe adjuntarse a un usuario o grupo.
+# resource "aws_iam_user_policy_attachment" "ip_restriction_attach" {
+#   user       = aws_iam_user.user.name
+#   policy_arn = aws_iam_policy.policy_access_by_ip.arn
+# }<

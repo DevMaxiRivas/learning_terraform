@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "test_bucket" {
-    bucket = var.s3_bucket_name
+  bucket = var.s3_bucket_name
 
   tags = {
     Name        = "My bucket"
@@ -9,7 +9,7 @@ resource "aws_s3_bucket" "test_bucket" {
 
 # Challenge 1: Create a user who can only view (Read-Only) S3 buckets, but cannot create a new one
 resource "aws_iam_user" "user" {
-    name = var.user_name
+  name = var.user_name
 }
 
 resource "aws_iam_access_key" "user" {
@@ -25,22 +25,23 @@ resource "aws_iam_user_policy_attachment" "attachment" {
 
 ## With custom policies for s3_bucket_name
 data "aws_iam_policy_document" "policy_object" {
-    statement {
-        actions   = [
-            "s3:Get*",
-            "s3:List*",
-            "s3:Describe*",
-            "s3-object-lambda:Get*",
-            "s3-object-lambda:List*"
-        ]
-        resources = [ "arn:aws:s3:::${var.s3_bucket_name}/*",]
-    }
+  statement {
+    actions = [
+      "s3:Get*",
+      "s3:List*",
+      "s3:Describe*",
+      "s3-object-lambda:Get*",
+      "s3-object-lambda:List*"
+    ]
+    resources = ["arn:aws:s3:::${var.s3_bucket_name}/*", ]
+
+  }
 }
 
 resource "aws_iam_policy" "policy" {
-  name   = var.policy_name
+  name        = var.policy_name
   description = "Policy read only for ${var.s3_bucket_name}"
-  policy = data.aws_iam_policy_document.policy_object.json
+  policy      = data.aws_iam_policy_document.policy_object.json
 }
 
 resource "aws_iam_user_policy_attachment" "test-attach" {
@@ -55,7 +56,7 @@ resource "aws_iam_user_policy_attachment" "test-attach" {
 
 ## Only for bucket test_role
 resource "aws_iam_role" "role" {
-  name = var.role_name
+  name               = var.role_name
   assume_role_policy = data.aws_iam_policy_document.policy_object.json
 }
 
@@ -83,8 +84,8 @@ data "aws_ami" "ami_amazon" {
 
 ## Creating an EC2 instance
 resource "aws_instance" "ec2_instance" {
-  ami           = data.aws_ami.ami_amazon.id
-  instance_type = "t3.micro"
+  ami                  = data.aws_ami.ami_amazon.id
+  instance_type        = "t3.micro"
   iam_instance_profile = var.profile_name
 
 
@@ -104,30 +105,21 @@ resource "aws_instance" "ec2_instance" {
 
 
 # Challenge 3: Configure a policy that only allows access to the AWS console if the request comes from a specific IP address (your home).
-data "aws_iam_policy_document" "policy_object_deny_all_ips" {
-    statement {
-        actions   = ["*"]
-        effect = "Deny"
-        resources = ["*"]
-        # condition {
-        #   notIpAddress: 
-        # }
+data "aws_iam_policy_document" "policy_data_access_by_ip" {
+  statement {
+    actions   = ["*"]
+    effect    = "Deny"
+    resources = ["*"]
+    condition {
+      test     = "IpAddress"
+      variable = "aws:SourceIp"
+      values   = ["102.222.12.123/32"]
     }
+  }
 }
 
-# {
-#   "Version": "2012-10-17",
-#   "Statement": [
-#     {
-#       "Sid": "RestrictToOfficeIP",
-#       "Effect": "Deny",
-#       "Action": "*",
-#       "Resource": "*",
-#       "Condition": {
-#         "NotIpAddress": {
-#           "aws:SourceIp": ["203.0.113.111/32"]
-#         }
-#       }
-#     }
-#   ]
-# }
+resource "aws_iam_policy" "policy_access_by_ip" {
+  name        = "policy_access_by_ip"
+  description = "Ip access Policy"
+  policy      = data.aws_iam_policy_document.policy_data_access_by_ip.json
+}
