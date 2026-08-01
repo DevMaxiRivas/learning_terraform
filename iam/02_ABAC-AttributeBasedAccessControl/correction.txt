@@ -1,0 +1,27 @@
+data "aws_iam_policy_document" "abac_ec2_policy" {
+  
+  # Bloque 1: Permite ver las instancias en la consola (obligatorio para uso humano)
+  statement {
+    sid       = "AllowDiscovery"
+    actions   = ["ec2:DescribeInstances", "ec2:DescribeTags"]
+    resources = ["*"] # Describe no soporta ARNs específicos ni condiciones de tag en la mayoría de los casos
+  }
+
+  # Bloque 2: La magia del ABAC (Start/Stop)
+  statement {
+    sid    = "AllowStartStopIfTeamMatches"
+    effect = "Allow"
+    actions = [
+      "ec2:StartInstances",
+      "ec2:StopInstances"
+    ]
+    resources = ["arn:aws:ec2:*:*:instance/*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:ResourceTag/Team"
+      # Usamos $$ para que Terraform no intente interpolarlo y lo pase literal a AWS
+      values   = ["$${aws:PrincipalTag/Team}"] 
+    }
+  }
+}
