@@ -1,0 +1,26 @@
+# Core Terraform directories and caches
+.terraform/
+
+# Local state files and backups (Must be kept out of Git for security)
+*.tfstate
+*.tfstate.*
+
+# Crash logs (Generated if Terraform encounters a fatal error)
+crash.log
+crash.*.log
+
+# Override files (Local adjustments that shouldn't affect production code)
+*.tfoverride
+*.tfoverride.json
+_override.tf
+_override.tf.json
+
+# Local environment configuration files (May contain secrets)
+*.tfvars
+*.tfvars.json
+
+# Ignore CLI configuration files
+.terraformrc
+terraform.rc
+
+*.lock.hcl

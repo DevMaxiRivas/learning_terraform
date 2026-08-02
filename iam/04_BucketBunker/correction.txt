@@ -1,0 +1,46 @@
+resource "aws_s3_bucket" "my_bucket" {
+  bucket = "my-bunker-bucket-123456"
+}
+
+# 1. Definimos la política del Búnker
+data "aws_iam_policy_document" "bucket_bunker_policy" {
+  statement {
+    sid    = "DenyAllExceptAuditor"
+    effect = "Deny"
+    actions = ["s3:*"]
+    resources = [
+      "arn:aws:s3:::${aws_s3_bucket.my_bucket.id}",
+      "arn:aws:s3:::${aws_s3_bucket.my_bucket.id}/*"
+    ]
+
+    # IMPORTANTE: En una Bucket Policy hay que decir a quién aplica
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+
+    condition {
+      test     = "ArnNotEquals"
+      variable = "aws:PrincipalArn"
+      values   = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/Auditoria"]
+    }
+  }
+}
+
+# 2. APLICAMOS la política al bucket (Esto es lo que faltaba)
+resource "aws_s3_bucket_policy" "apply_bunker_policy" {
+  bucket = aws_s3_bucket.my_bucket.id
+  policy = data.aws_iam_policy_document.bucket_bunker_policy.json
+}
+
+# 3. Usuario Administrador para la prueba
+resource "aws_iam_user" "admin_user" {
+  name = "AdminUser"
+}
+
+resource "aws_iam_user_policy_attachment" "attach_admin" {
+  user       = aws_iam_user.admin_user.name
+  policy_arn = "arn:aws:policy/AdministratorAccess"
+}
+
+data "aws_caller_identity" "current" {}
