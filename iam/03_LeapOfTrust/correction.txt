@@ -1,0 +1,68 @@
+# --- CONFIGURACIÓN PARA LA CUENTA B (PRODUCCIÓN) ---
+# Aquí se crea el recurso y el rol que permite el acceso.
+
+resource "aws_s3_bucket" "logs_bucket" {
+  bucket = "logs-bucket-proyecto-123" # Nombre único
+}
+
+# Identity Policy: Qué puede hacer el rol dentro de la Cuenta B
+data "aws_iam_policy_document" "s3_identity_policy_doc" {
+  statement {
+    actions = ["s3:Get*", "s3:List*"]
+    resources = [
+      "arn:aws:s3:::${aws_s3_bucket.logs_bucket.id}",   # Corregido: :::
+      "arn:aws:s3:::${aws_s3_bucket.logs_bucket.id}/*"
+    ]
+  }
+}
+
+resource "aws_iam_role" "role_analista" {
+  name = "AnalistaDeLogs"
+
+  # Trust Policy: Confía en la Cuenta A (ID: 222222222222)
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          # Se confía en la cuenta completa, no en user/*
+          AWS = "arn:aws:iam::222222222222:root" 
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "inline_s3_policy" {
+  name   = "S3ReadAccess"
+  role   = aws_iam_role.role_analista.id
+  policy = data.aws_iam_policy_document.s3_identity_policy_doc.json
+}
+
+
+# --- CONFIGURACIÓN PARA LA CUENTA A (DESARROLLO) ---
+# Aquí se crea el usuario que "saltará" a la Cuenta B.
+
+resource "aws_iam_user" "s3_user" {
+  name = "UserAnalistaDeLogs"
+  # Nota: En un entorno real, este recurso tendría un 'provider = aws.cuenta_a'
+}
+
+# Permiso para que el usuario de la Cuenta A pueda asumir el rol en B
+resource "aws_iam_user_policy" "allow_assume_b" {
+  name = "AllowAssumeRoleInAccountB"
+  user = aws_iam_user.s3_user.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action   = "sts:AssumeRole"
+        Effect   = "Allow"
+        Resource = aws_iam_role.role_analista.arn # ARN del rol en Cuenta B
+      }
+    ]
+  })
+}

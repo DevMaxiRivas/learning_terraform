@@ -8,4 +8,3 @@ Este es un clásico de arquitectura. Tienes una **Cuenta A** (Desarrollo) y una 
 *   **Lo que practicarás:** 
     *   `Principal` con ARN de otra cuenta.
     *   Flujo de seguridad entre cuentas (Cross-account access).
-
