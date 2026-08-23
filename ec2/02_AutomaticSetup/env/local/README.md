@@ -1,0 +1,1 @@
+This solution uses the NAT gateway to access the bucket (which results in higher costs)
