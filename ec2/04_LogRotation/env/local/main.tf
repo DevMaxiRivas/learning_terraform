@@ -1,0 +1,123 @@
+module "vpc" {
+  source              = "./../../modules/vpc"
+  cidr_block          = var.cidr_block
+  public_subnet_cidr  = var.public_subnets
+  private_subnet_cidr = var.private_subnets
+  availability_zone   = var.availability_zone
+  vpc_tags            = var.vpc_tags
+}
+
+resource "aws_cloudwatch_log_group" "log_group" {
+  name              = "/aws/ec2/instances"
+  retention_in_days = 30
+}
+
+# Trust Policy
+data "aws_iam_policy_document" "trust-policy-doc" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    effect  = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["ec2.amazonaws.com"]
+    }
+  }
+}
+
+# Role and Permission Definition
+data "aws_iam_policy_document" "permission-policy-doc" {
+  statement {
+    sid = "AllowCreateInstanceLog"
+    actions = [
+      "logs:Describe*",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["${aws_cloudwatch_log_group.log_group.arn}:*"]
+  }
+
+}
+
+resource "aws_iam_policy" "policy" {
+  name   = "AllowCreateInstanceLog"
+  policy = data.aws_iam_policy_document.permission-policy-doc.json
+}
+
+resource "aws_iam_role" "role" {
+  name               = "RolToRegisterLogs"
+  assume_role_policy = data.aws_iam_policy_document.trust-policy-doc.json
+}
+
+resource "aws_iam_role_policy_attachment" "policy_attachment" {
+  role       = aws_iam_role.role.name
+  policy_arn = aws_iam_policy.policy.arn
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_attachment" {
+  role       = aws_iam_role.role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+
+# To verify result from a command via SSM
+resource "aws_iam_role_policy_attachment" "ssm_attach" {
+  role       = aws_iam_role.role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+
+# Profile Definition
+resource "aws_iam_instance_profile" "profile" {
+  name = "ProfileToRegisterLogs"
+  role = aws_iam_role.role.name
+}
+
+# Fech AMI amazon
+data "aws_ami" "ami" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023*"]
+  }
+
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+
+}
+
+
+resource "aws_instance" "instance" {
+  ami                  = data.aws_ami.ami.id
+  subnet_id            = module.vpc.private_subnet_id
+  iam_instance_profile = aws_iam_instance_profile.profile.name
+  instance_type        = "t3.micro"
+  tags = {
+    Name = "local_ec2-instance"
+  }
+  user_data = file("./script.sh")
+
+  depends_on = [ aws_iam_instance_profile.profile ]
+
+}
+
+# ERROR: UnrecognizedClientException
+
+
+# aws ssm send-command \
+#   --instance-ids i-cdce2e9215e6140fb \
+#   --document-name AWS-RunShellScript \
+#   --parameters commands='["cat /tmp/scripts/init.sh"]'
+#   --parameters commands='["cat /var/log/user-data.log"]'
+
+# aws ssm get-command-invocation \
+#     --command-id d874ba74-051f-4cfb-a534-925c8fdedcad \
+#     --instance-id i-cdce2e9215e6140fb
