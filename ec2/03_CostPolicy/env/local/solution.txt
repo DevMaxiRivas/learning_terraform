@@ -1,0 +1,73 @@
+data "aws_caller_identity" "current" {}
+
+# Role and Permission Definition
+data "aws_iam_policy_document" "permission-policy-doc" {
+  
+  # Bloque 1: Permisos de lectura (Necesarios para usar la Consola/CLI)
+  statement {
+    sid       = "AllowDescribeActions"
+    actions   = ["ec2:Describe*"]
+    resources = ["*"]
+  }
+
+  # Bloque 2: Restricciones específicas al crear la INSTANCIA
+  statement {
+    sid       = "AllowRunInstancesWithLimits"
+    actions   = ["ec2:RunInstances"]
+    resources = ["arn:aws:ec2:*:*:instance/*"] # Aplicado específicamente al recurso instancia
+
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:InstanceType"
+      values   = ["t2.micro", "t3.micro"]
+    }
+
+    condition {
+      test     = "Null"
+      variable = "aws:RequestTag/Environment"
+      values   = ["false"] # Significa: El tag "Environment" NO debe ser nulo (debe existir)
+    }
+  }
+
+  # Bloque 3: Permitir el uso de recursos auxiliares para la creación
+  statement {
+    sid       = "AllowRequiredResources"
+    actions   = ["ec2:RunInstances"]
+    resources = [
+      "arn:aws:ec2:*:*:volume/*",
+      "arn:aws:ec2:*:*:network-interface/*",
+      "arn:aws:ec2:*:*:key-pair/*",
+      "arn:aws:ec2:*::image/*",
+      "arn:aws:ec2:*:*:security-group/*",
+      "arn:aws:ec2:*:*:subnet/*"
+    ]
+  }
+
+  # Bloque 4: Obligatorio si pides tags al crear
+  # Esta politica permite al usuario que pueda asignar una tag 
+  # siempre que solo se trate de una operacion ec2:CreateAction
+  statement {
+    sid       = "AllowCreateTagsOnLaunch"
+    actions   = ["ec2:CreateTags"]
+    resources = ["arn:aws:ec2:*:*:*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:CreateAction"
+      values   = ["RunInstances"]
+    }
+  }
+}
+
+resource "aws_iam_policy" "policy" {
+  name   = "AllowRunOnlyLowCostInstancePolicy"
+  policy = data.aws_iam_policy_document.permission-policy-doc.json
+}
+
+resource "aws_iam_user" "example_user" {
+  name = "example-user"
+}
+
+resource "aws_iam_user_policy_attachment" "user_policy_attach" {
+  user       = aws_iam_user.example_user.name
+  policy_arn = aws_iam_policy.policy.arn
+}
