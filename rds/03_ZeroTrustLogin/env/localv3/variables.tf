@@ -80,3 +80,7 @@ variable "db_port" {
   default = 5432
   type = number
 }
+
+variable "db_username_iam" {
+  default = "iam_db_user"
+}

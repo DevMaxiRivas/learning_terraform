@@ -30,13 +30,13 @@ resource "aws_security_group" "sg_database" {
 }
 
 // Ingress Rule for DB
-# resource "aws_vpc_security_group_ingress_rule" "allow_db_ingress" {
-#   security_group_id            = aws_security_group.sg_database.id
-#   referenced_security_group_id = aws_security_group.sg_apps.id
-#   ip_protocol                  = "tcp"
-#   from_port                    = var.db_port
-#   to_port                      = var.db_port
-# }
+resource "aws_vpc_security_group_ingress_rule" "allow_db_ingress" {
+  security_group_id            = aws_security_group.sg_database.id
+  referenced_security_group_id = aws_security_group.sg_apps.id
+  ip_protocol                  = "tcp"
+  from_port                    = var.db_port
+  to_port                      = var.db_port
+}
 
 resource "aws_security_group" "sg_apps" {
   name        = "allow_send_and_receive_request_from_ssm_and_db"
@@ -84,48 +84,48 @@ resource "aws_secretsmanager_secret_version" "db_secret_val" {
   })
 }
 
-# data "aws_iam_policy_document" "secret_policy" {
-#   statement {
-#     sid    = "AllowReadDBCredentials"
-#     effect = "Allow"
+data "aws_iam_policy_document" "secret_policy" {
+  statement {
+    sid    = "AllowReadDBCredentials"
+    effect = "Allow"
 
-#     principals {
-#       type = "AWS"
-#       identifiers = [
-#         "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
-#       ]
-#     }
+    principals {
+      type = "AWS"
+      identifiers = [
+        "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+      ]
+    }
 
-#     actions = [
-#       "secretsmanager:GetSecretValue",
-#       "secretsmanager:DescribeSecret"
-#     ]
+    actions = [
+      "secretsmanager:GetSecretValue",
+      "secretsmanager:DescribeSecret"
+    ]
 
-#     resources = [ aws_secretsmanager_secret.db_secret.arn ]
-#   }
-# }
+    resources = [ aws_secretsmanager_secret.db_secret.arn ]
+  }
+}
 
-# resource "aws_secretsmanager_secret_policy" "db_secret_policy_attachment" {
-#   secret_arn = aws_secretsmanager_secret.db_secret.arn
-#   policy     = data.aws_iam_policy_document.secret_policy.json
+resource "aws_secretsmanager_secret_policy" "db_secret_policy_attachment" {
+  secret_arn = aws_secretsmanager_secret.db_secret.arn
+  policy     = data.aws_iam_policy_document.secret_policy.json
 
-#   depends_on = [ aws_secretsmanager_secret.db_secret ]
-# }
+  depends_on = [ aws_secretsmanager_secret.db_secret ]
+}
 
 # Parameter group enforcing SSL (required for IAM authentication)
-# resource "aws_db_parameter_group" "default" {
-#   name   = "iam-auth-params"
-#   family = "postgres15"
+resource "aws_db_parameter_group" "default" {
+  name   = "iam-auth-params"
+  family = "postgres15"
 
-#   parameter {
-#     name  = "rds.force_ssl"
-#     value = "1"  # IAM authentication requires SSL
-#   }
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"  # IAM authentication requires SSL
+  }
 
-#   lifecycle {
-#     create_before_destroy = true
-#   }
-# }
+  lifecycle {
+    create_before_destroy = true
+  }
+}
 
 resource "aws_db_instance" "main_db" {
   identifier = "iam-auth-db-instance"
@@ -152,7 +152,7 @@ resource "aws_db_instance" "main_db" {
   depends_on = [aws_db_subnet_group.rds_subnet_group]
 
     # Force SSL connections (required for IAM auth)
-  # parameter_group_name = aws_db_parameter_group.default.name
+  parameter_group_name = aws_db_parameter_group.default.name
 
 }
 
@@ -172,7 +172,7 @@ resource "aws_iam_policy" "rds_connect" {
       {
         Effect = "Allow"
         Action = "rds-db:connect"
-        Resource = "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_instance.main_db.resource_id}/${aws_iam_role.ec2_instance_role.name}"
+        Resource = "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${aws_db_instance.main_db.dbi_resource_id}/${var.db_username_iam}"
       }
     ]
   })
@@ -218,6 +218,41 @@ resource "aws_iam_instance_profile" "ec2_instance_profile" {
   role = aws_iam_role.ec2_instance_role.name
 }
 
+# _______ Making PostgreSQL Connection _______
+
+terraform {
+  required_providers {
+    postgresql = {
+      source  = "cyrilgdn/postgresql"
+      version = "~> 1.25"
+    }
+  }
+}
+
+provider "postgresql" {
+  # Since we have opened an SSH tunnel to AWS, we must send all requests to localhost:5432.
+  database = aws_db_instance.main_db.db_name
+  # host     = aws_db_instance.main_db.address
+  # port = aws_db_instance.main_db.port
+  host     = "127.0.0.1"
+  port = 5432
+  username = aws_db_instance.main_db.username
+  password = random_password.secret.result
+  sslmode         = "require"
+  connect_timeout = 15
+}
+
+resource "postgresql_role" "iam_db_user" {
+  name  = var.db_username_iam
+  login = true
+
+  # This is the crucial requirement for AWS RDS IAM Authentication
+  roles = ["rds_iam"]
+  
+  depends_on = [ aws_db_instance.main_db, aws_iam_role.ec2_instance_role ]
+}
+
+
 # Fetch the latest AMI
 data "aws_ami" "ami" {
   most_recent = true
@@ -253,30 +288,33 @@ resource "aws_instance" "instance_test" {
               export DB_HOST="${aws_db_instance.main_db.address}"
               export DB_PORT="${aws_db_instance.main_db.port}"
               export DB_NAME="${aws_db_instance.main_db.db_name}"
-              export DB_USER="${aws_db_instance.main_db.username}"
 
-              export SECRET_DB_PASS=${aws_secretsmanager_secret.db_secret.name}
-
-              export PGPASSWORD=$(aws secretsmanager get-secret-value --secret-id $SECRET_DB_PASS --query SecretString --output text | jq -r .password)
+              export DB_USER="${var.db_username_iam}"
 
               # Install necessary packages
               dnf install nc -y
               dnf install iputils -y
               dnf install awscli -y
               dnf install jq -y
-
-              dnf install python3 -y
-              dnf install python3-pip
-
-              pip3 install boto3
-              pip install psycopg2-binary
+              dnf install postgresql15 -y
 
               export LOG_FILE=/tmp/check_connection_$(date +"%Y%m%d_%H%M%S").log
-
               nc -zv $DB_HOST $DB_PORT >> $LOG_FILE 2>&1
 
+              # Getting SSL Amazon's certificate
+              wget https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -O /tmp/global-bundle.pem
+
+
+              export PGPASSWORD=$(aws rds generate-db-auth-token \
+                --hostname $DB_HOST \
+                --port $DB_PORT \
+                --username $DB_USER \
+                --region ${data.aws_region.current.region}
+              )
+
               # Attempt a lightweight query
-              psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1" > /dev/null 2>&1
+              echo "Intentando conexión por IAM..."
+              psql "host=$DB_HOST port=$DB_PORT dbname=$DB_NAME user=$DB_USER sslmode=verify-full sslrootcert=/tmp/global-bundle.pem" -c "SELECT current_user; SELECT now();"
 
               # Check the exit status of the previous command
               if [ $? -eq 0 ]; then

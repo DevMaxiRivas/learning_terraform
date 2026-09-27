@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/home/maximiliano-rivas/Documents/aws/terraform/learning_terraform/rds/03_ZeroTrustLogin/env/local/scripts/./check_connection.py", line 3, in <module>
-    import boto3
-ModuleNotFoundError: No module named 'boto3'
